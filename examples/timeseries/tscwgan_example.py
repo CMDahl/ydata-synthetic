@@ -26,7 +26,6 @@ critic_iter = 5
 # Get transformed data stock - Univariate
 data, processed_data, scaler = processed_stock(path='./data/stock_data.csv', seq_len=seq_len, cols = 'Open')
 data_sample = processed_data[0]
-n_features = data_sample.shape[1]
 
 model_parameters = ModelParameters(batch_size=batch_size,
                            lr=learning_rate,
@@ -34,8 +33,7 @@ model_parameters = ModelParameters(batch_size=batch_size,
                            noise_dim=noise_dim,
                            n_cols=seq_len,
                            layers_dim=dim,
-                           condition = cond_dim,
-                           n_features = n_features)
+                           condition = cond_dim)
 
 train_args = TrainParameters(epochs=epochs,
                              sample_interval=log_step,
