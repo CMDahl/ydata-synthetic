@@ -44,7 +44,6 @@ class BaseModel():
         self.noise_dim = model_parameters.noise_dim
         self.data_dim = model_parameters.n_cols
         self.layers_dim = model_parameters.layers_dim
-        self.n_features = model_parameters.n_features
         self.define_gan()
 
     def __call__(self, inputs, **kwargs):
