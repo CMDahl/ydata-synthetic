@@ -24,7 +24,7 @@ models_dir = './cache'
 critic_iter = 5
 
 # Get transformed data stock - Univariate
-data, processed_data, scaler = processed_stock(path='./data/stock_data.csv', seq_len=seq_len, cols = 'Open')
+data, processed_data, scaler = processed_stock(path='./data/stock_data.csv', seq_len=seq_len, cols = ['Open'])
 data_sample = processed_data[0]
 
 model_parameters = ModelParameters(batch_size=batch_size,
