@@ -1,10 +1,9 @@
-from pandas import DataFrame
 from numpy import squeeze
 
-from ydata_synthetic.postprocessing.timeseries.inverse_preprocesser import inverse_transform
 from ydata_synthetic.preprocessing.timeseries import processed_stock
 from ydata_synthetic.synthesizers.timeseries import TSCWGAN
 from ydata_synthetic.synthesizers import ModelParameters, TrainParameters
+from ydata_synthetic.postprocessing.regular.inverse_preprocesser import inverse_transform
 
 model = TSCWGAN
 
@@ -51,10 +50,10 @@ synth = model.load(path='./tscwgan_stock.pkl')
 
 #Sampling the data
 #Note that the data returned is not inverse processed.
-step = int(len(processed_data)/(5-1))
-cond_array = DataFrame(data=[squeeze(processed_data[i][:cond_dim], axis=1) for i in range(0, len(processed_data), step)])
+cond_index = 100  # Arbitrary sequence for conditioning
+cond_array = squeeze(processed_data[cond_index][:cond_dim], axis=1)
 
-data_sample = synth.sample(cond_array, 200)
+data_sample = synth.sample(cond_array, 1000)
 
 # Inverting the scaling of the synthetic samples
 data_sample = inverse_transform(data_sample, scaler)
