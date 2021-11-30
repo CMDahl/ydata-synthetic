@@ -6,8 +6,9 @@ And on: https://github.com/CasperHogenboom/WGAN_financial_time-series
 from tqdm import trange
 from numpy import array, vstack
 from numpy.random import normal
+from typing import List
 
-from tensorflow import concat, float32, convert_to_tensor, reshape, GradientTape, reduce_mean, make_ndarray, make_tensor_proto, tile, expand_dims
+from tensorflow import concat, float32, convert_to_tensor, reshape, GradientTape, reduce_mean, make_ndarray, make_tensor_proto, tile, constant
 from tensorflow import data as tfdata
 from tensorflow.keras import Model, Sequential
 from tensorflow.keras.optimizers import Adam
@@ -16,6 +17,7 @@ from tensorflow.keras.layers import Input, Conv1D, Dense, LeakyReLU, Flatten, Ad
 from ydata_synthetic.synthesizers.gan import BaseModel
 from ydata_synthetic.synthesizers import TrainParameters
 from ydata_synthetic.synthesizers.loss import Mode, gradient_penalty
+from ydata_synthetic.synthesizers.timeseries import TimeSeriesDataProcessor
 
 class TSCWGAN(BaseModel):
 
@@ -23,9 +25,9 @@ class TSCWGAN(BaseModel):
 
     def __init__(self, model_parameters, gradient_penalty_weight=10):
         """Create a base TSCWGAN."""
+        super().__init__(model_parameters)
         self.gradient_penalty_weight = gradient_penalty_weight
         self.cond_dim = model_parameters.condition
-        super().__init__(model_parameters)
 
     def define_gan(self):
         self.generator = Generator(self.batch_size). \
@@ -44,14 +46,18 @@ class TSCWGAN(BaseModel):
         score = concat([cond, gen], axis=1)
         score = self.critic(score)
 
-    def train(self, data, train_arguments: TrainParameters):
-        real_batches = self.get_batch_data(data)
+    def train(self, data, train_arguments: TrainParameters, num_cols: List[str], cat_cols: List[str],
+              preprocess: bool = True):
+        super().train(data, num_cols, cat_cols, preprocess)
+
+        processed_data = self.processor.transform(data)
+        real_batches = self.get_batch_data(processed_data)
         noise_batches = self.get_batch_noise()
 
         for epoch in trange(train_arguments.epochs):
             for i in range(train_arguments.critic_iter):
                 real_batch = next(real_batches)
-                noise_batch = next(noise_batches)[:len(real_batch)]  # Truncate the noise tensor in the shape of the real data tensor
+                noise_batch = next(noise_batches)[:len(real_batch)]  # Truncate noise tensor to real data shape
 
                 c_loss = self.update_critic(real_batch, noise_batch)
 
@@ -142,21 +148,31 @@ class TSCWGAN(BaseModel):
                                 .shuffle(buffer_size=n_windows)
                                 .batch(self.batch_size).repeat())
 
-    def sample(self, cond_array, n_samples):
-        """Provided that cond_array is passed, produce n_samples for each condition vector in cond_array."""
-        assert len(cond_array.shape) == 1, "Condition array should be one-dimensional."
-        assert cond_array.shape[0] == self.cond_dim, \
-            f"The condition sequence should have a {self.cond_dim} length."
+    def sample(self, cond_array: array, n_samples: int, inverse_transform: bool = True):
+        """Provided that cond_array is passed, produce n_samples for each condition vector in cond_array.
+        The returned samples per condition will always be a multiple of batch_size and equal or bigger than n_samples.
+
+        Arguments:
+            cond_array (numpy array): Array with the set of conditions for the sampling process.
+            n_samples (int): Number of samples to be taken for each condition in cond_array.
+            inverse_transform (bool): """
+        assert len(cond_array.shape) == 2, "Condition array should be two-dimensional. N_conditions x cond_dim"
+        assert cond_array.shape[1] == self.cond_dim, \
+            f"The condition sequences should have a {self.cond_dim} length."
         steps = n_samples // self.batch_size + 1
         data = []
         z_dist = self.get_batch_noise()
-        cond_seq = expand_dims(convert_to_tensor(cond_array, float32), axis=0)
-        cond_seq = tile(cond_seq, multiples=[self.batch_size, 1])
-        for step in trange(steps, desc=f'Synthetic data generation'):
-            gen_input = concat([cond_seq, next(z_dist)], axis=1)
-            records = make_ndarray(make_tensor_proto(self.generator(gen_input, training=False)))
-            data.append(records)
-        return array(vstack(data))
+        for condition in cond_array:
+            cond_seq = convert_to_tensor(condition, float32)
+            cond_seq = tile(cond_seq, multiples=[self.batch_size, 1])
+            for step in trange(steps, desc=f'Synthetic data generation'):
+                gen_input = concat([cond_seq, next(z_dist)], axis=1)
+                records = self.generator(gen_input, training=False)
+                data.append(records)
+        data = array(vstack(data))
+        if inverse_transform:
+            return self.processor.inverse_transform(data)
+        return data
 
 
 class Generator(Model):
