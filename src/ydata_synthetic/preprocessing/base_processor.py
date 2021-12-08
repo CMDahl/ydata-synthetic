@@ -1,46 +1,36 @@
-from typing import List, Union
+"Base class of Data Preprocessors, do not instantiate this class directly."
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections import namedtuple
 from typing import List, Optional
 
-from numpy import ndarray
-from pandas import DataFrame, Series
+from numpy import concatenate, ndarray, split, zeros
+from pandas import DataFrame, Series, concat
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.exceptions import NotFittedError
 from typeguard import typechecked
 
 ProcessorInfo = namedtuple("ProcessorInfo", ["numerical", "categorical"])
-PipelineInfo = namedtuple("PipelineInfo", ["pipeline_name", "feat_names_in", "feat_names_out"])
+PipelineInfo = namedtuple("PipelineInfo", ["feat_names_in", "feat_names_out"])
 
-
+# pylint: disable=R0902
 @typechecked
-class BaseProcessor(BaseEstimator, TransformerMixin):
+class BaseProcessor(ABC, BaseEstimator, TransformerMixin):
     """
-    Base class for Data Preprocessing. It is a base version and should not be instantiated directly.
-    It works like any other transformer in scikit learn with the methods fit, transform and inverse transform.
+    This data processor works like a scikit learn transformer in with the methods fit, transform and inverse transform.
     Args:
-        num_cols (list of strings/list of ints):
-            List of names of numerical columns or positional indexes (if pos_idx was set to True).
-        cat_cols (list of strings/list of ints):
-            List of names of categorical columns or positional indexes (if pos_idx was set to True).
-        pos_idx (bool):
-            Specifies if the passed col IDs are names or positional indexes (column numbers).
+        num_cols (list of strings):
+            List of names of numerical columns.
+        cat_cols (list of strings):
+            List of names of categorical columns.
     """
-    def __init__(self, *, num_cols: Union[List[str], List[int]] = None, cat_cols: Union[List[str], List[int]] = None,
-                 pos_idx: bool = False):
+    def __init__(self, num_cols: Optional[List[str]] = None, cat_cols: Optional[List[str]] = None):
         self.num_cols = [] if num_cols is None else num_cols
         self.cat_cols = [] if cat_cols is None else cat_cols
 
-        self.num_col_idx_ = None
-        self.cat_col_idx_ = None
-
-        self.num_pipeline = None  # To be overriden by child processors
-
-        self.cat_pipeline = None  # To be overriden by child processors
-
-        self._types = None
-        self.col_order_ = None
-        self.pos_idx = pos_idx
+        self._num_pipeline = None  # To be overriden by child processors
+        self._cat_pipeline = None  # To be overriden by child processors
 
         self._col_transform_info = None  # Metadata object mapping inputs/outputs of each pipeline
 
@@ -60,8 +50,8 @@ class BaseProcessor(BaseEstimator, TransformerMixin):
         return self._types
 
     @property
-    def col_transform_info(self) -> PipelineInfo:
-        """Returns a PipelineInfo object specifying input/output feature mappings of this processor's pipelines."""
+    def col_transform_info(self) -> ProcessorInfo:
+        """Returns a ProcessorInfo object specifying input/output feature mappings of this processor's pipelines."""
         self._check_is_fitted()
         if self._col_transform_info is None:
             self._col_transform_info = self.__create_metadata_synth()
@@ -72,16 +62,10 @@ class BaseProcessor(BaseEstimator, TransformerMixin):
         cat_info = None
         # Numerical ls named tuple
         if self.num_cols:
-            num_info = PipelineInfo(
-                                    'numeric',
-                                    self.num_pipeline.feature_names_in_,
-                                    self.num_pipeline.get_feature_names_out())
+            num_info = PipelineInfo(self.num_pipeline.feature_names_in_, self.num_pipeline.get_feature_names_out())
         # Categorical ls named tuple
         if self.cat_cols:
-            cat_info = PipelineInfo(
-                                    'categorical',
-                                    self.cat_pipeline.feature_names_in_,
-                                    self.cat_pipeline.get_feature_names_out())
+            cat_info = PipelineInfo(self.cat_pipeline.feature_names_in_, self.cat_pipeline.get_feature_names_out())
         return ProcessorInfo(num_info, cat_info)
 
     def _check_is_fitted(self):
@@ -101,7 +85,7 @@ class BaseProcessor(BaseEstimator, TransformerMixin):
         assert intersection == set(), f"num_cols and cat_cols share columns {intersection} but should be disjoint."
         assert missing == set(), f"The columns {missing} of the provided dataset were not attributed to a pipeline."
 
-    # pylint: disable=C0103
+    # pylint: disable=C0103, W0106, W0201
     @abstractmethod
     def fit(self, X: DataFrame) -> BaseProcessor:
         """Fits the DataProcessor to a passed DataFrame.
@@ -110,17 +94,16 @@ class BaseProcessor(BaseEstimator, TransformerMixin):
                 DataFrame used to fit the processor parameters.
                 Should be aligned with the num/cat columns defined in initialization.
         """
-        if self.pos_idx:
-            self.num_cols = list(X.columns[self.num_cols])
-            self.cat_cols = list(X.columns[self.cat_cols])
+        self._validate_cols(X.columns)
+
         self.col_order_ = [c for c in X.columns if c in self.num_cols + self.cat_cols]
         self._types = X.dtypes
 
         self.num_pipeline.fit(X[self.num_cols]) if self.num_cols else zeros([len(X), 0])
         self.cat_pipeline.fit(X[self.cat_cols]) if self.cat_cols else zeros([len(X), 0])
-
         return self
 
+    # pylint: disable=W0201
     def transform(self, X: DataFrame) -> ndarray:
         """Transforms the passed DataFrame with the fit DataProcessor.
         Args:
@@ -128,18 +111,15 @@ class BaseProcessor(BaseEstimator, TransformerMixin):
                 DataFrame used to fit the processor parameters.
                 Should be aligned with the num/cat columns defined in initialization.
         Returns:
-            transformed (ndarray):
-                Processed version of the passed DataFrame.
+            transformed (ndarray): Processed version of the passed DataFrame.
         """
         num_data = self.num_pipeline.transform(X[self.num_cols]) if self.num_cols else zeros([len(X), 0])
         cat_data = self.cat_pipeline.transform(X[self.cat_cols]) if self.cat_cols else zeros([len(X), 0])
 
-        transformed = concatenate([num_data, cat_data], axis=1)
-
         self.num_col_idx_ = num_data.shape[1]
         self.cat_col_idx_ = self.num_col_idx_ + cat_data.shape[1]
 
-        return transformed
+        return concatenate([num_data, cat_data], axis=1)
 
     def inverse_transform(self, X: ndarray) -> DataFrame:
         """Inverts the data transformation pipelines on a passed DataFrame.
@@ -147,10 +127,10 @@ class BaseProcessor(BaseEstimator, TransformerMixin):
             X (ndarray):
                 Numpy array to be brought back to the original data format.
                 Should share the schema of data transformed by this DataProcessor.
-                Can be used to revert transformations of training data or for
+                Can be used to revert transformations of training data or for generated samples.
         Returns:
             result (DataFrame):
-                DataFrame with inverted
+                DataFrame with the preprocessing transformation inverted.
         """
         num_data, cat_data, _ = split(X, [self.num_col_idx_, self.cat_col_idx_], axis=1)
 
