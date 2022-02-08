@@ -27,12 +27,22 @@ Original file is located at
 """
 
 #Importing the required libs for the exercise
+#Importing the required libs for the exercise
+import os
+path = 'Z:/faellesmappe/cmd/tfs_alt/ydata-synthetic/src'
+os.chdir(path)
+print("Current working directory: {0}".format(os.getcwd()))
+import sys
+sys.path.append(path)
 
 from os import path
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
+physical_devices = tf.config.experimental.list_physical_devices('GPU')
+for device in physical_devices:
+    tf.config.experimental.set_memory_growth(device, True)
 import pickle
 from sklearn.preprocessing import MinMaxScaler
 from tqdm import tqdm
@@ -41,6 +51,7 @@ from ydata_synthetic.synthesizers import ModelParameters
 from ydata_synthetic.preprocessing.timeseries import processed_stock
 from ydata_synthetic.synthesizers.timeseries import TimeGAN
 from sklearn.model_selection import TimeSeriesSplit
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Force TF to use only the CPU
 
 def fit_ar_1(ts):
     try:
@@ -115,7 +126,7 @@ def CB_timeGAN(synth,alpha_true, T=1000,warm = 1000,seq_len=150,replications=100
         y  = real_data_loading(y,seq_len)
         
         synth = TimeGAN(model_parameters=gan_args, hidden_dim=24, seq_len=seq_len, n_seq=n_seq, gamma=1)
-        synth.train(y, train_steps=5000)
+        synth.train(y, train_steps=1000)
         synth_data = synth.sample(resamples)
         
         estimates = [];
